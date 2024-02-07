@@ -70,7 +70,8 @@ def main():
     backup_timestamp = time.time()
     while (True):
         pinfo = get_process_info(op_config)
-        working_set_size = "???" if pinfo is None else f"{int(pinfo["working_set_size"]) / 1024 / 1024}MiB"
+        working_set_size_mib = 0 if pinfo is None else int(pinfo["working_set_size"]) / 1024 / 1024
+        working_set_size = "???" if pinfo is None else f"{working_set_size_mib}MiB"
         pid = "???" if pinfo is None else pinfo["pid"]
         additional_info = "" if pinfo is None else f"[pid: {pid}, WSS: {working_set_size}]" 
         logger.log(f"Polling tick {additional_info}")
