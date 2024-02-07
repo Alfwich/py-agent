@@ -69,7 +69,11 @@ def main():
 
     backup_timestamp = time.time()
     while (True):
-        logger.log("Polling tick")
+        pinfo = get_process_info(op_config)
+        working_set_size = "???" if pinfo is None else f"{int(pinfo["working_set_size"]) / 1024 / 1024}MiB"
+        pid = "???" if pinfo is None else pinfo["pid"]
+        additional_info = "" if pinfo is None else f"[pid: {pid}, WSS: {working_set_size}]" 
+        logger.log(f"Polling tick {additional_info}")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
@@ -111,10 +115,30 @@ def get_config_to_execute(cfg, config_key):
 
     return result
 
+
 def get_all_running_processes():
     if os.name == 'nt':
+        at_or_default = lambda d, i: d[i] if len(d) > i else ""
         d = str(subprocess.check_output(['wmic', 'process', 'list', 'brief']))
-        return list(map(lambda x: x.replace("\\r", "").replace(" ", "").replace("\\t", ""), d.split("\\r\\r\\n")))
+        infos = list(map(lambda x: x.replace("\\r", ""), d.split("\\r\\r\\n")))
+        infos = list(map(lambda x: x.split(" "), infos))
+        # HandleCount, Name, Priority, ProcessId, ThreadCount, WorkingSetSize
+        results = []
+        for i in infos:
+            entry = list(filter(lambda x: x, i))
+
+            # Only care about valid entries 
+            results.append({
+                    "raw": "".join(i),
+                    "handle_count": at_or_default(entry, 0),
+                    "name": at_or_default(entry, 1),
+                    "priority": at_or_default(entry, 2),
+                    "pid": at_or_default(entry, 3),
+                    "thread_count": at_or_default(entry, 4),
+                    "working_set_size": at_or_default(entry, 5),
+                })
+
+        return results
     else:
         # TODO: Linux?
         return []
@@ -122,15 +146,18 @@ def get_all_running_processes():
 def get_process_name_for_config(cfg):
     return cfg['exec_poll_name'] if ('exec_poll_name' in cfg and len(cfg['exec_poll_name']) > 0) else cfg['exec_name']
 
-def is_process_running(cfg):
+def get_process_info(cfg):
     pname_to_consider = get_process_name_for_config(cfg)
     processes = get_all_running_processes()
 
     for p in processes:
-        if pname_to_consider in p:
-            return True
+        if pname_to_consider in p["raw"]:
+            return p 
 
-    return False
+    return None
+
+def is_process_running(cfg):
+    return False if get_process_info(cfg) is None else True
 
 # https://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename
 def slugify(value, allow_unicode=False):
