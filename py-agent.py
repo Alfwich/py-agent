@@ -74,7 +74,7 @@ def main():
         additional_info = ""
         if not pinfo is None:
             working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
-            working_set_size = f"{working_set_size_mib}MiB"
+            working_set_size = f"{working_set_size_mib:.2f}MiB"
             pid = pinfo["pid"]
             time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
             time_till_next_backup = f", bkup_in: {time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else ", bkup_in: NOW"
