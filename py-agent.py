@@ -8,62 +8,77 @@ import shutil
 import unicodedata
 import re
 
+class Logger(object):
+    prefix = None
+
+    def __init__(self, prefix):
+        self.prefix = prefix
+
+
+    def log(self, msg):
+        print(f"[{self.prefix}][{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] {msg}")
+
 # Expected usage: ./python py-agent.py <config-to-execute> [config-file]
 # Example: python py-agent.py "mspaint"
 # Example: python py-agent.py "mspaint" config.ini
 def main():
+    logger = Logger(None)
+    target_config = None
     config_path = 'config.ini'
     if not len(sys.argv) in [2, 3]:
-        log("Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
+        logger.log("Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
         exit(-1)
-
-    config_key = sys.argv[1]
 
     if len(sys.argv) == 3:
         config_path = sys.argv[2]
 
     if not os.path.isfile(config_path):
-        log("Failed to find config file: %s. Please either target a config file or create 'config.ini' at the root." % config_path)
+        logger.log(f"Failed to find config file: {config_path}. Please either target a config file or create 'config.ini' at the root.")
         exit(-1)
 
     cfg = read_config(config_path)
 
-    if not config_key in cfg:
-        log("Config '%s' not found in %s" % (config_key, config_path))
+    available_configs = list(filter(lambda x: x != 'DEFAULT' and x != 'global', cfg.keys()))
+    logger.log(f"Available configs: {available_configs}")
+
+    target_config = sys.argv[1]
+
+    logger = Logger(target_config)
+
+    if not target_config in cfg:
+        logger.log(f"Config '{target_config}' not found in {config_path}")
         exit(-1)
 
-    op_config = get_config_to_execute(cfg, config_key)
+    op_config = get_config_to_execute(cfg, target_config)
 
     has_process = is_process_running(op_config)
 
-    available_configs = list(filter(lambda x: x != 'DEFAULT' and x != 'global', cfg.keys()))
-    log(f"Available configs: {available_configs}")
-    log("Config selected '%s':" % config_key)
+    logger.log(f"Config selected '{target_config}':")
     for key, value in op_config.items():
-        log("\t[%s] => %s" % (key, value))
+        logger.log(f"\t[{key}] => {value}")
 
     if has_process:
-        log("Detected existing running process, skipping setup script")
+        logger.log("Detected existing running process, skipping setup script")
     elif len(op_config['exec_setup_script']) > 0:
-        log("Executing setup script: %s" % op_config['exec_setup_script'])
+        logger.log(f"Executing setup script: {op_config['exec_setup_script']}")
         p = subprocess.Popen(op_config['exec_setup_script'])
         p.wait()
 
-    log("Setting execution path: %s" % op_config['exec_dir'])
+    logger.log(f"Setting execution path: {op_config['exec_dir']}")
     os.chdir(op_config['exec_dir'])
 
     backup_timestamp = time.time()
     while (True):
-        log("Polling tick")
+        logger.log("Polling tick")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
-            log("Starting process %s" % op_config['exec_name'])
+            logger.log(f"Starting process {op_config['exec_name']}")
             if len(op_config['exec_name']) > 0:
                 subprocess.Popen((op_config['exec_name'], op_config['exec_args']))
             elif len(op_config['exec_startup_script']) > 0:
                 subprocess.Popen(op_config['exec_startup_script'])
             else:
-                log("Failed to startup process as we don't have a exec_name or exec_startup_script")
+                logger.log("Failed to startup process as we don't have a exec_name or exec_startup_script")
                 exit(-1)
 
             delay = max(int(op_config['exec_launch_cooloff']), delay)
@@ -73,11 +88,11 @@ def main():
 
             now = datetime.datetime.now()
             date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
-            backup_name = "%s.%s" % (get_process_name_for_config(op_config), date_str)
-            log("Performing server backup '%s' ..." % (backup_name))
-            shutil.make_archive("%s/%s" % (op_config['backup_dest_dir'], backup_name), 'zip', op_config['backup_target_dir'])
+            backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
+            logger.log(f"Performing backup '{backup_name}'")
+            shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
             backup_timestamp = time.time()
-            log("Done!")
+            logger.log("Done!")
 
         time.sleep(delay)
 
@@ -116,10 +131,6 @@ def is_process_running(cfg):
             return True
 
     return False
-
-def log(msg):
-    now = datetime.datetime.now()
-    print("[%s] %s" % (now.strftime("%Y-%m-%d %H:%M:%S"), msg))
 
 # https://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename
 def slugify(value, allow_unicode=False):
