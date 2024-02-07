@@ -67,13 +67,18 @@ def main():
     logger.log(f"Setting execution path: {op_config['exec_dir']}")
     os.chdir(op_config['exec_dir'])
 
+    has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
     backup_timestamp = time.time()
     while (True):
         pinfo = get_process_info(op_config)
-        working_set_size_mib = 0 if pinfo is None else int(pinfo["working_set_size"]) / 1024 / 1024
-        working_set_size = "???" if pinfo is None else f"{working_set_size_mib}MiB"
-        pid = "???" if pinfo is None else pinfo["pid"]
-        additional_info = "" if pinfo is None else f"[pid: {pid}, WSS: {working_set_size}]" 
+        additional_info = ""
+        if not pinfo is None:
+            working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
+            working_set_size = f"{working_set_size_mib}MiB"
+            pid = pinfo["pid"]
+            time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
+            time_till_next_backup = f", bkup_in: {time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else ", bkup_in: NOW"
+            additional_info = f"[pid: {pid}, WSS: {working_set_size}{time_till_next_backup}]" 
         logger.log(f"Polling tick {additional_info}")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
@@ -89,7 +94,7 @@ def main():
             delay = max(int(op_config['exec_launch_cooloff']), delay)
             backup_timestamp = time.time()
             has_process = True
-        elif time.time() - backup_timestamp >= float(op_config['backup_interval']):
+        elif has_backup and time.time() - backup_timestamp >= float(op_config['backup_interval']):
 
             now = datetime.datetime.now()
             date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
