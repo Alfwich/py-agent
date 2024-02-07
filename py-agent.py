@@ -14,9 +14,9 @@ class Logger(object):
     def __init__(self, prefix):
         self.prefix = prefix
 
-
     def log(self, msg):
-        print(f"[{self.prefix}][{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] {msg}")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{self.prefix}][{timestamp}] {msg}")
 
 # Expected usage: ./python py-agent.py <config-to-execute> [config-file]
 # Example: python py-agent.py "mspaint"
