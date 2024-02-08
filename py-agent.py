@@ -71,7 +71,13 @@ def main():
     os.chdir(op_config['exec_dir'])
 
     has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
-    backup_timestamp = time.time()
+    backup_timestamp = 0
+    if has_backup:
+        bkup_file_name = bkup_file_name_for_config(op_config)
+        bkup_cfg = read_bkup_config(bkup_file_name)
+        if 'last_bkup' in bkup_cfg:
+            backup_timestamp = bkup_cfg['last_bkup'] 
+
     while (True):
         logger.log(f"Polling tick [{get_additional_process_info(op_config, backup_timestamp)}]")
         delay = int(op_config['poll_interval'])
@@ -110,13 +116,14 @@ def get_additional_process_info(op_config, backup_timestamp):
     return ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
 
 def perform_backup(logger, op_config):
-    bkup_file_name = backup_file_name_for_path(op_config['backup_dest_dir'])
+    bkup_file_name = bkup_file_name_for_config(op_config)
     cfg = read_bkup_config(bkup_file_name)
     now = datetime.datetime.now()
     date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
     cfg["bkups"].append({ "name": backup_name, "timestamp": time.time() })
+    cfg["last_bkup"] = time.time()
     shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
     cfg = prune_backups(op_config, cfg, logger)
     write_bkup_config(bkup_file_name, cfg)
@@ -136,12 +143,14 @@ def prune_backups(op_config, cfg, logger):
 
     return cfg
 
-def backup_file_name_for_path(path):
-    bkup_file_name = "py-agent-bkup-manifest.json"
+def bkup_file_name_for_config(op_config):
+    path = op_config['backup_dest_dir']
+    pname = get_process_name_for_config(op_config)
+    bkup_file_name = f"py-agent-bkup-manifest.{slugify(pname)}.json"
     return f"{path}/{bkup_file_name}"
 
 def read_bkup_config(path):
-    result = { "version": 0, "bkups": [] }
+    result = { "version": 0, "bkups": [] , "last_bkup": 0 }
 
     if os.path.isfile(path):
         with open(path) as f:
