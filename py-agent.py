@@ -57,6 +57,8 @@ def main():
     for key, value in op_config.items():
         logger.log(f"\t[{key}] => {value}")
 
+    set_title(f"[{target_config}] py-agent")
+
     if has_process:
         logger.log("Detected existing running process, skipping setup script")
     elif len(op_config['exec_setup_script']) > 0:
@@ -148,6 +150,13 @@ def get_all_running_processes():
     else:
         # TODO: Linux?
         return []
+
+def set_title(title):
+    if os.name == 'nt':
+        os.system(f"title {title}")
+    else:
+        # TODO: Linux?
+        pass
 
 def get_process_name_for_config(cfg):
     return cfg['exec_poll_name'] if ('exec_poll_name' in cfg and len(cfg['exec_poll_name']) > 0) else cfg['exec_name']
