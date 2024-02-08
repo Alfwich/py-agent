@@ -7,6 +7,7 @@ import configparser
 import shutil
 import unicodedata
 import re
+import json
 
 class Logger(object):
     prefix = None
@@ -72,16 +73,7 @@ def main():
     has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
     backup_timestamp = time.time()
     while (True):
-        pinfo = get_process_info(op_config)
-        additional_info = ""
-        if not pinfo is None:
-            working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
-            working_set_size = f"{working_set_size_mib:.2f}MiB"
-            pid = pinfo["pid"]
-            time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
-            time_till_next_backup = f", bkup_in: {time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else ", bkup_in: NOW"
-            additional_info = f"[pid: {pid}, WSS: {working_set_size}{time_till_next_backup}]" 
-        logger.log(f"Polling tick {additional_info}")
+        logger.log(f"Polling tick [{get_additional_process_info(op_config, backup_timestamp)}]")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
@@ -97,16 +89,72 @@ def main():
             backup_timestamp = time.time()
             has_process = True
         elif has_backup and time.time() - backup_timestamp >= float(op_config['backup_interval']):
-
-            now = datetime.datetime.now()
-            date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
-            backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
-            logger.log(f"Performing backup '{backup_name}'")
-            shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
+            perform_backup(logger, op_config)
             backup_timestamp = time.time()
-            logger.log("Done!")
 
         time.sleep(delay)
+
+def get_additional_process_info(op_config, backup_timestamp):
+    result = {}
+    pinfo = get_process_info(op_config)
+    has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
+    if not pinfo is None:
+        working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
+        working_set_size = f"{working_set_size_mib:.2f}MiB"
+        result["WSS"] = working_set_size
+        result["pid"] = pinfo["pid"]
+        if has_backup:
+            time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
+            result["bkup_in"] = f"{time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else "NOW"
+
+    return ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
+
+def perform_backup(logger, op_config):
+    bkup_file_name = backup_file_name_for_path(op_config['backup_dest_dir'])
+    cfg = read_bkup_config(bkup_file_name)
+    now = datetime.datetime.now()
+    date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
+    backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
+    logger.log(f"Performing backup '{backup_name}'")
+    cfg["bkups"].append({ "name": backup_name, "timestamp": time.time() })
+    shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
+    cfg = prune_backups(op_config, cfg, logger)
+    write_bkup_config(bkup_file_name, cfg)
+    logger.log("Done!")
+
+def prune_backups(op_config, cfg, logger):
+    total_bkups_to_keep = int(op_config["backup_total_to_keep"])
+    if len(cfg["bkups"]) > total_bkups_to_keep:
+        logger.log("Pruning backups")
+        cfg["bkups"].sort(key=lambda e: e['timestamp'])
+
+        while len(cfg["bkups"]) > total_bkups_to_keep:
+            bkup_name_to_delete = cfg["bkups"].pop(0)["name"]
+            bkup_file_to_delete = f"{op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
+            logger.log(f"Removing {bkup_name_to_delete}")
+            os.remove(bkup_file_to_delete)
+
+    return cfg
+
+def backup_file_name_for_path(path):
+    bkup_file_name = "py-agent-bkup-manifest.json"
+    return f"{path}/{bkup_file_name}"
+
+def read_bkup_config(path):
+    result = { "version": 0, "bkups": [] }
+
+    if os.path.isfile(path):
+        with open(path) as f:
+            result = json.loads(f.read())
+
+    return result
+
+def write_bkup_config(path, cfg):
+    json_data = json.dumps(cfg)
+    if len(json_data) > 0:
+        with open(path, "w") as f:
+            f.write(json_data)
+
 
 def read_config(config_path):
     config = configparser.ConfigParser()
