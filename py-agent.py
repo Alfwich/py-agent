@@ -8,6 +8,15 @@ import shutil
 import unicodedata
 import re
 import json
+import signal
+from enum import Enum
+
+class AgentState(Enum):
+    UNKNOWN = 0
+    SETUP = 1
+    RUNNING = 2
+    SHUTTING_DOWN = 4
+    FINISHED = 5
 
 class Logger(object):
     prefix = None
@@ -19,11 +28,41 @@ class Logger(object):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{self.prefix}][{timestamp}] {msg}")
 
+agent_state = AgentState.UNKNOWN
+def set_agent_state(new_state):
+    global agent_state
+    agent_state = new_state
+
+def get_agent_state():
+    global agent_state
+    return agent_state
+
+# Share these concepts with the signal_handler
+logger = Logger(None)
+op_config = None
+def signal_handler(sig, frame):
+
+    # The only case where we do a soft-shutdown is when the agent is running.
+    if get_agent_state() is AgentState.RUNNING:
+        # Perform an explicit backup and signal to the agent to terminate operations
+        logger.log(f"Shutting down agent... Ctrl+C again to force quit")
+        set_agent_state(AgentState.SHUTTING_DOWN)
+    # Provide a hatch to let the user explicitly terminate the process
+    else: 
+        sys.exit(0)
+
 # Expected usage: ./python py-agent.py <config-to-execute> [config-file]
 # Example: python py-agent.py "mspaint"
 # Example: python py-agent.py "mspaint" config.ini
 def main():
-    logger = Logger(None)
+
+    global logger
+    global op_config
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    set_agent_state(AgentState.SETUP)
+
     target_config = None
     config_path = 'config.ini'
     if not len(sys.argv) in [2, 3]:
@@ -35,6 +74,7 @@ def main():
 
     if not os.path.isfile(config_path):
         logger.log(f"Failed to find config file: {config_path}. Please either target a config file or create 'config.ini' at the root.")
+        logger.log("Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
         exit(-1)
 
     cfg = read_config(config_path)
@@ -78,8 +118,10 @@ def main():
         if 'last_bkup' in bkup_cfg:
             backup_timestamp = bkup_cfg['last_bkup'] 
 
-    while (True):
-        logger.log(f"Polling tick [{get_additional_process_info(op_config, backup_timestamp)}]")
+    set_agent_state(AgentState.RUNNING)
+
+    while (get_agent_state() is AgentState.RUNNING):
+        logger.log(f"Polling tick {get_additional_process_info(op_config, backup_timestamp)}")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
@@ -100,6 +142,10 @@ def main():
 
         time.sleep(delay)
 
+    # Do an explicit backup before terminating the agent process
+    logger.log("Performing shutdown backup save")
+    perform_backup(logger, op_config)
+
 def get_additional_process_info(op_config, backup_timestamp):
     result = {}
     pinfo = get_process_info(op_config)
@@ -113,7 +159,11 @@ def get_additional_process_info(op_config, backup_timestamp):
             time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
             result["bkup_in"] = f"{time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else "NOW"
 
-    return ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
+    if result:
+        inner = ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
+        return f"[{inner}]"
+    else:
+        return ""
 
 def perform_backup(logger, op_config):
     bkup_file_name = bkup_file_name_for_config(op_config)
