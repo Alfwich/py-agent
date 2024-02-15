@@ -9,7 +9,10 @@ import unicodedata
 import re
 import json
 import signal
+import hashlib
+
 from enum import Enum
+from pathlib import Path
 
 class AgentState(Enum):
     UNKNOWN = 0
@@ -146,6 +149,8 @@ def main():
     logger.log("Performing shutdown backup save")
     perform_backup(logger, op_config)
 
+    set_agent_state(AgentState.FINISHED)
+
 def get_additional_process_info(op_config, backup_timestamp):
     result = {}
     pinfo = get_process_info(op_config)
@@ -172,12 +177,22 @@ def perform_backup(logger, op_config):
     date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
-    cfg["bkups"].append({ "name": backup_name, "timestamp": time.time() })
-    cfg["last_bkup"] = time.time()
-    shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
-    cfg = prune_backups(op_config, cfg, logger)
+    bkup_hash = calc_md5_for_dir(op_config['backup_target_dir'])
+    cfg['last_bkup'] = time.time()
+
+    if not 'last_bkup_hash' in cfg or not bkup_hash == cfg['last_bkup_hash']:
+        cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": bkup_hash })
+        cfg['last_bkup_hash'] = bkup_hash
+        shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
+        cfg = prune_backups(op_config, cfg, logger)
+        write_bkup_config(bkup_file_name, cfg)
+    else:
+        cfg['last_bkup_hash'] = bkup_hash
+        logger.log("Not backing up as backup directory has not changed")
+
     write_bkup_config(bkup_file_name, cfg)
     logger.log("Done!")
+
 
 def prune_backups(op_config, cfg, logger):
     total_bkups_to_keep = int(op_config["backup_total_to_keep"])
@@ -298,6 +313,23 @@ def slugify(value, allow_unicode=False):
         value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]+', '-', value).strip('-_')
+
+
+
+def calc_md5_for_dir(directory):
+    def md5_update_from_dir(directory, hash):
+        assert Path(directory).is_dir()
+        for path in sorted(Path(directory).iterdir(), key=lambda p: str(p).lower()):
+            hash.update(path.name.encode())
+            if path.is_file():
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash.update(chunk)
+            elif path.is_dir():
+                hash = md5_update_from_dir(path, hash)
+        return hash
+
+    return md5_update_from_dir(directory, hashlib.md5()).hexdigest()
 
 if __name__ == "__main__":
     main()
