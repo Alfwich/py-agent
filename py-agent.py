@@ -179,21 +179,49 @@ def perform_backup(logger, op_config):
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
     bkup_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
-    cfg['last_bkup'] = time.time()
 
     if not 'last_bkup_hash' in cfg or not bkup_hash == cfg['last_bkup_hash']:
-        cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": bkup_hash })
-        cfg['last_bkup_hash'] = bkup_hash
-        shutil.make_archive(f"{op_config['backup_dest_dir']}/{backup_name}", 'zip', op_config['backup_target_dir'])
-        cfg = prune_backups(op_config, cfg, logger)
-        write_bkup_config(bkup_file_name, cfg)
+        num_trys = 1
+        archive_name = f"{op_config['backup_dest_dir']}/{backup_name}"
+        while True:
+            shutil.make_archive(archive_name, 'zip', op_config['backup_target_dir'])
+            bkup_check_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+            if bkup_hash == bkup_check_hash:
+                logger.log('Bkup written to disk')
+                break
+            elif num_trys > 5:
+                logger.log(f"Failed to bkup as the non-matching hash failed {num_trys-1} times")
+                bkup_hash = None
+
+                if os.path.isfile(archive_name):
+                    os.remove(archive_name)
+
+                break
+            else:
+                logger.log('Detected non-matching hash for bkup. Attempting again...')
+                num_trys += 1
+                bkup_hash = bkup_check_hash
+
+                if os.path.isfile(archive_name):
+                    os.remove(archive_name)
+
+
+        if not bkup_hash is None:
+            cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": bkup_hash })
+            cfg['last_bkup'] = time.time()
+            cfg['last_bkup_hash'] = bkup_hash
+            cfg = prune_backups(op_config, cfg, logger)
     else:
+        cfg['last_bkup'] = time.time()
         cfg['last_bkup_hash'] = bkup_hash
         logger.log("Not backing up as backup directory has not changed")
 
-    write_bkup_config(bkup_file_name, cfg)
+    if not bkup_hash is None:
+        write_bkup_config(bkup_file_name, cfg)
+        logger.log("Done!")
+    else:
+        logger.log("Aborting")
 
-    logger.log("Done!")
 
 
 def prune_backups(op_config, cfg, logger):
