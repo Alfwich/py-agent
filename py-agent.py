@@ -146,8 +146,9 @@ def main():
         time.sleep(delay)
 
     # Do an explicit backup before terminating the agent process
-    logger.log("Performing shutdown backup save")
-    perform_backup(logger, op_config)
+    if has_backup:
+        logger.log("Performing shutdown backup save")
+        perform_backup(logger, op_config)
 
     set_agent_state(AgentState.FINISHED)
 
@@ -177,7 +178,7 @@ def perform_backup(logger, op_config):
     date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
-    bkup_hash = calc_md5_for_dir(op_config['backup_target_dir'])
+    bkup_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
     cfg['last_bkup'] = time.time()
 
     if not 'last_bkup_hash' in cfg or not bkup_hash == cfg['last_bkup_hash']:
@@ -191,6 +192,7 @@ def perform_backup(logger, op_config):
         logger.log("Not backing up as backup directory has not changed")
 
     write_bkup_config(bkup_file_name, cfg)
+
     logger.log("Done!")
 
 
@@ -245,7 +247,6 @@ def get_config_to_execute(cfg, config_key):
     result.update(dict(cfg[config_key]))
 
     return result
-
 
 def get_all_running_processes():
     if os.name == 'nt':
