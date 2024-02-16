@@ -22,6 +22,7 @@ class AgentState(Enum):
     FINISHED = 5
 
 class Logger(object):
+    indent = 0
     prefix = None
 
     def __init__(self, prefix):
@@ -29,7 +30,13 @@ class Logger(object):
 
     def log(self, msg):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{self.prefix}][{timestamp}] {msg}")
+        print(f"[{self.prefix}][{timestamp}] {'  ' * self.indent}{msg}")
+
+    def push_indent(self):
+        self.indent += 1
+
+    def pop_indent(self):
+        self.indent = self.indent - 1 if self.indent == 1 else 0
 
 agent_state = AgentState.UNKNOWN
 def set_agent_state(new_state):
@@ -98,8 +105,10 @@ def main():
     has_process = is_process_running(op_config)
 
     logger.log(f"Config selected '{target_config}':")
+    logger.push_indent()
     for key, value in op_config.items():
-        logger.log(f"\t[{key}] => {value}")
+        logger.log(f"[{key}] => {value}")
+    logger.pop_indent()
 
     set_title(f"[{target_config}] py-agent")
 
@@ -178,51 +187,43 @@ def perform_backup(logger, op_config):
     date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
-    bkup_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+    logger.push_indent()
+
+    bkup_tmp_dir = f"{op_config['backup_dest_dir']}/tmp"
+    bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
+    bkup_hash = None 
+
+    while True:
+        bkup_check_hash = None
+        if os.path.exists(bkup_tmp_dir):
+            shutil.rmtree(bkup_tmp_dir)
+
+        os.makedirs(bkup_tmp_name)
+
+        bkup_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+        shutil.copytree(op_config['backup_target_dir'], bkup_tmp_name, dirs_exist_ok=True)
+        bkup_check_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+
+        if bkup_hash == bkup_check_hash:
+            break
 
     if not 'last_bkup_hash' in cfg or not bkup_hash == cfg['last_bkup_hash']:
-        num_trys = 1
         archive_name = f"{op_config['backup_dest_dir']}/{backup_name}"
-        while True:
-            shutil.make_archive(archive_name, 'zip', op_config['backup_target_dir'])
-            bkup_check_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
-            if bkup_hash == bkup_check_hash:
-                logger.log('Bkup written to disk')
-                break
-            elif num_trys > 5:
-                logger.log(f"Failed to bkup as the non-matching hash failed {num_trys-1} times")
-                bkup_hash = None
-
-                if os.path.isfile(archive_name):
-                    os.remove(archive_name)
-
-                break
-            else:
-                logger.log('Detected non-matching hash for bkup. Attempting again...')
-                num_trys += 1
-                bkup_hash = bkup_check_hash
-
-                if os.path.isfile(archive_name):
-                    os.remove(archive_name)
-
-
-        if not bkup_hash is None:
-            cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": bkup_hash })
-            cfg['last_bkup'] = time.time()
-            cfg['last_bkup_hash'] = bkup_hash
-            cfg = prune_backups(op_config, cfg, logger)
-    else:
-        cfg['last_bkup'] = time.time()
+        shutil.make_archive(archive_name, 'zip', bkup_tmp_name)
+        cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": bkup_hash })
         cfg['last_bkup_hash'] = bkup_hash
+        cfg = prune_backups(op_config, cfg, logger)
+        logger.log(f"Backup written to disk hash: {bkup_hash}")
+    else:
         logger.log("Not backing up as backup directory has not changed")
 
-    if not bkup_hash is None:
-        write_bkup_config(bkup_file_name, cfg)
-        logger.log("Done!")
-    else:
-        logger.log("Aborting")
+    shutil.rmtree(bkup_tmp_dir)
 
+    cfg['last_bkup'] = time.time()
+    write_bkup_config(bkup_file_name, cfg)
 
+    logger.log('Done!')
+    logger.pop_indent()
 
 def prune_backups(op_config, cfg, logger):
     total_bkups_to_keep = int(op_config["backup_total_to_keep"])
