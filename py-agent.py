@@ -133,6 +133,9 @@ def main():
     set_agent_state(AgentState.RUNNING)
 
     while (get_agent_state() is AgentState.RUNNING):
+        # Hook for automated testing instrumentation 
+        test_hook(op_config)
+
         logger.log(f"Polling tick {get_additional_process_info(op_config, backup_timestamp)}")
         delay = int(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
@@ -153,6 +156,7 @@ def main():
             backup_timestamp = time.time()
 
         time.sleep(delay)
+
 
     # Do an explicit backup before terminating the agent process
     if has_backup:
@@ -346,8 +350,6 @@ def slugify(value, allow_unicode=False):
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]+', '-', value).strip('-_')
 
-
-
 def calc_md5_for_dir(directory):
     def md5_update_from_dir(directory, hash):
         assert Path(directory).is_dir()
@@ -362,6 +364,16 @@ def calc_md5_for_dir(directory):
         return hash
 
     return md5_update_from_dir(directory, hashlib.md5()).hexdigest()
+
+def test_hook(op_config):
+    if not test_hook.init is True:
+        test_hook.init_timestamp = time.time()
+        test_hook.init = True
+        test_hook.runtime = int(op_config['sample_runtime']) if ('sample_runtime' in op_config and op_config['sample_runtime'].isnumeric()) else None
+
+    if not test_hook.runtime is None and time.time() - test_hook.init_timestamp > test_hook.runtime:
+        signal_handler(signal.SIGINT, None)
+test_hook.init = False
 
 if __name__ == "__main__":
     main()
