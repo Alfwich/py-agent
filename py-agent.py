@@ -189,22 +189,25 @@ def perform_backup(logger, op_config):
     logger.log(f"Performing backup '{backup_name}'")
     logger.push_indent()
 
+    bkup_target_hash_dir = op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir']
+
     bkup_tmp_dir = f"{op_config['backup_dest_dir']}/tmp"
     bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
     bkup_hash = None 
 
     while True:
-        bkup_check_hash = None
         if os.path.exists(bkup_tmp_dir):
             shutil.rmtree(bkup_tmp_dir)
 
         os.makedirs(bkup_tmp_name)
 
-        bkup_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+        bkup_hash = calc_md5_for_dir(bkup_target_hash_dir)
         shutil.copytree(op_config['backup_target_dir'], bkup_tmp_name, dirs_exist_ok=True)
-        bkup_check_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
 
-        if bkup_hash == bkup_check_hash:
+        # Check to ensure that the tmp copy is the same as the existing files on-disk by rehashing
+        # the target directory a second time after the copy. If the hashs dont match then we need to 
+        # recopy the files as they might have changed while the agent was making the tmp copy.
+        if bkup_hash == calc_md5_for_dir(bkup_target_hash_dir)
             break
 
     if not 'last_bkup_hash' in cfg or not bkup_hash == cfg['last_bkup_hash']:
