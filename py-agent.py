@@ -14,12 +14,14 @@ import hashlib
 from enum import Enum
 from pathlib import Path
 
+
 class AgentState(Enum):
     UNKNOWN = 0
     SETUP = 1
     RUNNING = 2
     SHUTTING_DOWN = 4
     FINISHED = 5
+
 
 class Logger(object):
     indent = 0
@@ -38,18 +40,25 @@ class Logger(object):
     def pop_indent(self):
         self.indent = self.indent - 1 if self.indent == 1 else 0
 
+
 agent_state = AgentState.UNKNOWN
+
+
 def set_agent_state(new_state):
     global agent_state
     agent_state = new_state
+
 
 def get_agent_state():
     global agent_state
     return agent_state
 
+
 # Share these concepts with the signal_handler
 logger = Logger(None)
 op_config = None
+
+
 def signal_handler(sig, frame):
 
     # The only case where we do a soft-shutdown is when the agent is running.
@@ -58,12 +67,14 @@ def signal_handler(sig, frame):
         logger.log(f"Shutting down agent... Ctrl+C again to force quit")
         set_agent_state(AgentState.SHUTTING_DOWN)
     # Provide a hatch to let the user explicitly terminate the process
-    else: 
+    else:
         sys.exit(0)
 
 # Expected usage: ./python py-agent.py <config-to-execute> [config-file]
 # Example: python py-agent.py "mspaint"
 # Example: python py-agent.py "mspaint" config.ini
+
+
 def main():
 
     global logger
@@ -76,20 +87,24 @@ def main():
     target_config = None
     config_path = 'config.ini'
     if not len(sys.argv) in [2, 3]:
-        logger.log("Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
+        logger.log(
+            "Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
         exit(-1)
 
     if len(sys.argv) == 3:
         config_path = sys.argv[2]
 
     if not os.path.isfile(config_path):
-        logger.log(f"Failed to find config file: {config_path}. Please either target a config file or create 'config.ini' at the root.")
-        logger.log("Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
+        logger.log(f"Failed to find config file: {
+                   config_path}. Please either target a config file or create 'config.ini' at the root.")
+        logger.log(
+            "Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
         exit(-1)
 
     cfg = read_config(config_path)
 
-    available_configs = list(filter(lambda x: x != 'DEFAULT' and x != 'global', cfg.keys()))
+    available_configs = list(
+        filter(lambda x: x != 'DEFAULT' and x != 'global', cfg.keys()))
     logger.log(f"Available configs: {available_configs}")
 
     target_config = sys.argv[1]
@@ -122,33 +137,40 @@ def main():
     logger.log(f"Setting execution path: {op_config['exec_dir']}")
     os.chdir(op_config['exec_dir'])
 
-    has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
+    has_backup = len(op_config['backup_interval']) > 0 and len(
+        op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
     backup_timestamp = 0
     if has_backup:
         bkup_file_name = bkup_file_name_for_config(op_config)
         bkup_cfg = read_bkup_config(bkup_file_name)
         if 'last_bkup' in bkup_cfg:
-            backup_timestamp = bkup_cfg['last_bkup'] 
+            backup_timestamp = bkup_cfg['last_bkup']
+
+    has_test = get_field_or_default(op_config, 'test_enabled', False)
 
     set_agent_state(AgentState.RUNNING)
 
     while get_agent_state() is AgentState.RUNNING:
-        # Hook for automated testing instrumentation 
-        test_hook(op_config)
+        # Hook for automated testing instrumentation
+        if has_test:
+            test_hook(op_config)
 
         if not get_agent_state() is AgentState.RUNNING:
             break
 
-        logger.log(f"Polling tick {get_additional_process_info(op_config, backup_timestamp)}")
+        logger.log(f"Polling tick {get_additional_process_info(
+            op_config, backup_timestamp)}")
         delay = float(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
             if len(op_config['exec_name']) > 0:
-                subprocess.Popen((op_config['exec_name'], op_config['exec_args']))
+                subprocess.Popen(
+                    (op_config['exec_name'], op_config['exec_args']))
             elif len(op_config['exec_startup_script']) > 0:
                 subprocess.Popen(op_config['exec_startup_script'])
             else:
-                logger.log("Failed to startup process as we don't have a exec_name or exec_startup_script")
+                logger.log(
+                    "Failed to startup process as we don't have a exec_name or exec_startup_script")
                 exit(-1)
 
             delay = max(float(op_config['exec_launch_cooloff']), delay)
@@ -160,33 +182,41 @@ def main():
 
         time.sleep(delay)
 
-
     # Do an explicit backup before terminating the agent process
     if has_backup:
         logger.log("Performing shutdown backup save")
         perform_backup(logger, op_config)
 
-
     set_agent_state(AgentState.FINISHED)
+
+
+def get_field_or_default(cfg, field_name, default):
+    t = type(default)
+    return t(cfg[field_name]) if (field_name in cfg and len(cfg[field_name]) > 0) else default
+
 
 def get_additional_process_info(op_config, backup_timestamp):
     result = {}
     pinfo = get_process_info(op_config)
-    has_backup = len(op_config['backup_interval']) > 0 and len(op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
+    has_backup = len(op_config['backup_interval']) > 0 and len(
+        op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
     if not pinfo is None:
         working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
         working_set_size = f"{working_set_size_mib:.2f}MiB"
         result["WSS"] = working_set_size
         result["pid"] = pinfo["pid"]
         if has_backup:
-            time_till_next_backup_seconds = 0 if not has_backup else float(op_config['backup_interval']) - (time.time() - backup_timestamp) 
-            result["bkup_in"] = f"{time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else "NOW"
+            time_till_next_backup_seconds = 0 if not has_backup else float(
+                op_config['backup_interval']) - (time.time() - backup_timestamp)
+            result["bkup_in"] = f"{
+                time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else "NOW"
 
     if result:
         inner = ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
         return f"[{inner}]"
     else:
         return ""
+
 
 def perform_backup(logger, op_config):
     bkup_file_name = bkup_file_name_for_config(op_config)
@@ -208,19 +238,22 @@ def perform_backup(logger, op_config):
         os.makedirs(bkup_tmp_name)
 
         whole_bkup_hash = calc_md5_for_dir(op_config['backup_target_dir'])
-        consider_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if ('backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
-        shutil.copytree(op_config['backup_target_dir'], bkup_tmp_name, dirs_exist_ok=True)
+        consider_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if (
+            'backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
+        shutil.copytree(op_config['backup_target_dir'],
+                        bkup_tmp_name, dirs_exist_ok=True)
 
-        # Check to ensure that the tmp copy is the same as the existing files on-disk by rehashing
-        # the target directory a second time after the copy. If the hashs don't match then we need to 
-        # recopy the files as they might have changed while the agent was making the tmp copy.
-        if whole_bkup_hash == calc_md5_for_dir(op_config['backup_target_dir']):
+        # Check to ensure that existing target directory and the tmp copy are the same, and that the target
+        # directory did not change while we were making the backup archive.
+        # If the hashs don't match then we need to recopy the files as they might have changed while the agent was making the tmp copy.
+        if whole_bkup_hash == calc_md5_for_dir(op_config['backup_target_dir']) == calc_md5_for_dir(bkup_tmp_name):
             break
 
     if not 'last_bkup_hash' in cfg or not consider_hash == cfg['last_bkup_hash']:
         archive_name = f"{op_config['backup_dest_dir']}/{backup_name}"
         shutil.make_archive(archive_name, 'zip', bkup_tmp_name)
-        cfg['bkups'].append({ "name": backup_name, "timestamp": time.time(), "bkup_hash": consider_hash})
+        cfg['bkups'].append(
+            {"name": backup_name, "timestamp": time.time(), "bkup_hash": consider_hash})
         cfg['last_bkup_hash'] = consider_hash
         cfg = prune_backups(op_config, cfg, logger)
         logger.log(f"Backup written to disk hash: {consider_hash}")
@@ -235,6 +268,7 @@ def perform_backup(logger, op_config):
     logger.log('Done!')
     logger.pop_indent()
 
+
 def prune_backups(op_config, cfg, logger):
     total_bkups_to_keep = int(op_config["backup_total_to_keep"])
     if len(cfg["bkups"]) > total_bkups_to_keep:
@@ -243,12 +277,14 @@ def prune_backups(op_config, cfg, logger):
 
         while len(cfg["bkups"]) > total_bkups_to_keep:
             bkup_name_to_delete = cfg["bkups"].pop(0)["name"]
-            bkup_file_to_delete = f"{op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
+            bkup_file_to_delete = f"{
+                op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
             logger.log(f"Removing {bkup_name_to_delete}")
             if os.path.isfile(bkup_file_to_delete):
                 os.remove(bkup_file_to_delete)
 
     return cfg
+
 
 def bkup_file_name_for_config(op_config):
     path = op_config['backup_dest_dir']
@@ -256,14 +292,16 @@ def bkup_file_name_for_config(op_config):
     bkup_file_name = f"bkup-manifest.{slugify(pname)}.json"
     return f"{path}/{bkup_file_name}"
 
+
 def read_bkup_config(path):
-    result = { "version": 0, "bkups": [] , "last_bkup": 0 }
+    result = {"version": 0, "bkups": [], "last_bkup": 0}
 
     if os.path.isfile(path):
         with open(path) as f:
             result = json.loads(f.read())
 
     return result
+
 
 def write_bkup_config(path, cfg):
     json_data = json.dumps(cfg)
@@ -277,6 +315,7 @@ def read_config(config_path):
     config.read(config_path)
     return config
 
+
 def get_config_to_execute(cfg, config_key):
     result = dict()
 
@@ -287,9 +326,10 @@ def get_config_to_execute(cfg, config_key):
 
     return result
 
+
 def get_all_running_processes():
     if os.name == 'nt':
-        at_or_default = lambda d, i: d[i] if len(d) > i else ""
+        def at_or_default(d, i): return d[i] if len(d) > i else ""
         d = str(subprocess.check_output(['wmic', 'process', 'list', 'brief']))
         infos = list(map(lambda x: x.replace("\\r", ""), d.split("\\r\\r\\n")))
         infos = list(map(lambda x: x.split(" "), infos))
@@ -298,21 +338,22 @@ def get_all_running_processes():
         for i in infos:
             entry = list(filter(lambda x: x, i))
 
-            # Only care about valid entries 
+            # Only care about valid entries
             results.append({
-                    "raw": "".join(i),
-                    "handle_count": at_or_default(entry, 0),
-                    "name": at_or_default(entry, 1),
-                    "priority": at_or_default(entry, 2),
-                    "pid": at_or_default(entry, 3),
-                    "thread_count": at_or_default(entry, 4),
-                    "working_set_size": at_or_default(entry, 5),
-                })
+                "raw": "".join(i),
+                "handle_count": at_or_default(entry, 0),
+                "name": at_or_default(entry, 1),
+                "priority": at_or_default(entry, 2),
+                "pid": at_or_default(entry, 3),
+                "thread_count": at_or_default(entry, 4),
+                "working_set_size": at_or_default(entry, 5),
+            })
 
         return results
     else:
         # TODO: Linux?
         return []
+
 
 def set_title(title):
     if os.name == 'nt':
@@ -321,8 +362,10 @@ def set_title(title):
         # TODO: Linux?
         pass
 
+
 def get_process_name_for_config(cfg):
     return cfg['exec_poll_name'] if ('exec_poll_name' in cfg and len(cfg['exec_poll_name']) > 0) else cfg['exec_name']
+
 
 def get_process_info(cfg):
     pname_to_consider = get_process_name_for_config(cfg)
@@ -330,12 +373,14 @@ def get_process_info(cfg):
 
     for p in processes:
         if pname_to_consider.lower() in p["raw"].lower():
-            return p 
+            return p
 
     return None
 
+
 def is_process_running(cfg):
     return False if get_process_info(cfg) is None else True
+
 
 # https://stackoverflow.com/questions/295135/turn-a-string-into-a-valid-filename
 def slugify(value, allow_unicode=False):
@@ -350,9 +395,11 @@ def slugify(value, allow_unicode=False):
     if allow_unicode:
         value = unicodedata.normalize('NFKC', value)
     else:
-        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        value = unicodedata.normalize('NFKD', value).encode(
+            'ascii', 'ignore').decode('ascii')
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]+', '-', value).strip('-_')
+
 
 def calc_md5_for_dir(directory):
     def md5_update_from_dir(directory, hash):
@@ -369,21 +416,20 @@ def calc_md5_for_dir(directory):
 
     return md5_update_from_dir(directory, hashlib.md5()).hexdigest()
 
-def test_hook(op_config):
-    if not test_hook.init is True:
-        test_hook.init_timestamp = time.time()
-        test_hook.init = True
-        test_hook.runtime = int(op_config['sample_runtime']) if ('sample_runtime' in op_config and op_config['sample_runtime'].isnumeric()) else None
 
-    if not test_hook.runtime is None and time.time() - test_hook.init_timestamp > test_hook.runtime:
+def test_hook(op_config):
+    runtime = get_field_or_default(op_config, 'test_sample_runtime', 0)
+
+    if runtime > 0 and time.time() - test_hook.init_timestamp > runtime:
         signal_handler(signal.SIGINT, None)
 
-    if 'kill_process_on_exit' in op_config and bool(op_config['kill_process_on_exit']) and get_agent_state() is AgentState.SHUTTING_DOWN:
+    if get_field_or_default(op_config, 'test_kill_process_on_exit', False) and get_agent_state() is AgentState.SHUTTING_DOWN:
         pinfo = get_process_info(op_config)
         if not pinfo is None:
             os.kill(int(pinfo['pid']), signal.SIGINT)
 
-test_hook.init = False
+
+test_hook.init_timestamp = time.time()
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,8 @@ from pathlib import Path
 tmp_path = "target/test"
 tmp_path_test_target_dir = f"{tmp_path}/test_target"
 tmp_path_test_bkup_dir = f"{tmp_path}/bkup"
+
+
 def setup(config):
 
     if os.path.exists(tmp_path):
@@ -29,8 +31,10 @@ def setup(config):
     with open(f"{tmp_path}/config.ini", "w") as f:
         f.write(config)
 
+
 def teardown():
     shutil.rmtree(tmp_path)
+
 
 def run_test(key, config, test_fn):
     setup(config)
@@ -38,6 +42,7 @@ def run_test(key, config, test_fn):
     teardown()
 
     return result
+
 
 def run_test_agent(key, test_fn):
     cmd = f"{sys.executable} .\\py-agent.py {key} .\\target\\test\\config.ini"
@@ -57,36 +62,40 @@ def run_test_agent(key, test_fn):
         "result": "passed" if (result is None and result_code == 0) else "failed",
     }
 
+
 def boot_test(p):
     # nothing to test, so long as the test does not throw an exception we're good
-    assert(True)
+    assert (True)
+
 
 def backup_test(p):
     backup_files = os.listdir(tmp_path_test_bkup_dir)
 
     # Should only have a single manifest and a single backup
-    assert(len(backup_files) == 2)
-    manifest_file_name = next((x for x in backup_files if x.endswith('.json')), None)
+    assert (len(backup_files) == 2)
+    manifest_file_name = next(
+        (x for x in backup_files if x.endswith('.json')), None)
 
     # Should have the manifest .json
-    assert(manifest_file_name)
+    assert (manifest_file_name)
     cfg = None
     with open(f"{tmp_path_test_bkup_dir}/{manifest_file_name}") as f:
         cfg = json.loads(f.read())
 
     # Cfg json should be valid and available
-    assert(cfg)
+    assert (cfg)
 
     # We should only have a single backup
-    assert(len(cfg["bkups"]) == 1)
+    assert (len(cfg["bkups"]) == 1)
 
     # The top-level hash should match the single backup hash
-    assert(cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"])
+    assert (cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"])
 
     # The timestamp for the single backup should be close to the final backup time
-    assert(cfg["bkups"][0]["timestamp"] - cfg["last_bkup"] < 10.0)
+    assert (cfg["bkups"][0]["timestamp"] - cfg["last_bkup"] < 10.0)
 
     # TODO: Check that the backup has been made per specifications
+
 
 def generate_config(cwd):
 
@@ -106,8 +115,9 @@ def generate_config(cwd):
         backup_target_dir = {cwd}/target/test/test_target
         backup_target_hash_dir =
         backup_dest_dir = {cwd}/target/test/bkup
-        sample_runtime = 1
-        kill_process_on_exit = True
+        test_enabled = True
+        test_sample_runtime = 1
+        test_kill_process_on_exit = True
 
         [boot_test]
 
@@ -122,15 +132,17 @@ def generate_config(cwd):
         # TODO: Linux?
         return ""
 
+
 def main():
     config = generate_config(os.getcwd())
-    assert(len(config) > 0)
+    assert (len(config) > 0)
     results = [
         run_test("boot_test", config, boot_test),
         run_test("backup_test", config, backup_test),
-        ]
+    ]
 
     print(results)
+
 
 if __name__ == "__main__":
     main()
