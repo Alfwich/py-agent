@@ -1,18 +1,12 @@
 import sys
-import time
 import subprocess
 import os
-import datetime
-import configparser
 import shutil
-import unicodedata
-import re
 import json
+import time
 import signal
-import hashlib
 
-from enum import Enum
-from pathlib import Path
+import agent
 
 tmp_path = "target/test"
 tmp_path_test_target_dir = f"{tmp_path}/test_target"
@@ -45,56 +39,60 @@ def run_test(key, config, test_fn):
 
 
 def run_test_agent(key, test_fn):
-    cmd = f"{sys.executable} .\\py-agent.py {key} .\\target\\test\\config.ini"
     print(f"Running test: {key}")
-    p = subprocess.Popen(cmd, shell=True)
-    p.wait()
 
-    result_code = p.returncode
-    result = test_fn(p)
-    if result is None and result_code == 0:
+    prev_argv = sys.argv
+    prev_cwd = os.getcwd()
+    sys.argv = [".\\agent.py ", f"{key}", ".\\target\\test\\config.ini"]
+    agent.main.test_hook = test_hook
+    test_hook.init_timestamp = time.time()
+
+    result = None
+    try:
+        agent.main()
+        os.chdir(prev_cwd)
+        test_fn()
+    except Exception as e:
+        print(f"Failed test: {key} due to: {e=}")
+        result = False
+
+    agent.main.test_hook = None
+
+    if result is None:
         print("Passed")
     else:
         print("Failed")
 
     return {
         "key": key,
-        "result": "passed" if (result is None and result_code == 0) else "failed",
+        "result": "passed" if result is None else "failed",
     }
 
 
-def boot_test(p):
-    # nothing to test, so long as the test does not throw an exception we're good
-    assert (True)
+def boot_test():
+    assert True, 'NOOP'
 
 
-def backup_test(p):
+def backup_test():
     backup_files = os.listdir(tmp_path_test_bkup_dir)
 
-    # Should only have a single manifest and a single backup
-    assert (len(backup_files) == 2)
+    assert len(backup_files) == 2, 'Should only have 2 files in backup directory'
     manifest_file_name = next(
         (x for x in backup_files if x.endswith('.json')), None)
 
-    # Should have the manifest .json
-    assert (manifest_file_name)
+    assert manifest_file_name, 'Should have the manifest .json'
     cfg = None
     with open(f"{tmp_path_test_bkup_dir}/{manifest_file_name}") as f:
         cfg = json.loads(f.read())
 
-    # Cfg json should be valid and available
-    assert (cfg)
+    assert cfg, 'Cfg json should be valid'
 
-    # We should only have a single backup
-    assert (len(cfg["bkups"]) == 1)
+    assert len(cfg["bkups"]) == 1, 'We should only have a single backup'
 
-    # The top-level hash should match the single backup hash
-    assert (cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"])
+    assert cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"], 'Top level hash should match the single backup hash'
 
-    # The timestamp for the single backup should be close to the final backup time
-    assert (cfg["bkups"][0]["timestamp"] - cfg["last_bkup"] < 10.0)
-
-    # TODO: Check that the backup has been made per specifications
+    assert cfg["bkups"][0]["timestamp"] - \
+        cfg["last_bkup"] < 10.0, 'The timestamp for the single backup should be close to the final backup time'
 
 
 def generate_config(cwd):
@@ -131,6 +129,18 @@ def generate_config(cwd):
     else:
         # TODO: Linux?
         return ""
+
+
+def test_hook(op_config):
+    runtime = agent.get_field_or_default(op_config, 'test_sample_runtime', 0)
+    print(runtime)
+    if runtime > 0 and time.time() - test_hook.init_timestamp > runtime:
+        agent.signal_handler(signal.SIGINT, None)
+
+    if agent.get_field_or_default(op_config, 'test_kill_process_on_exit', False) and agent.get_agent_state() is agent.AgentState.SHUTTING_DOWN:
+        pinfo = agent.get_process_info(op_config)
+        if not pinfo is None:
+            os.kill(int(pinfo['pid']), signal.SIGINT)
 
 
 def main():

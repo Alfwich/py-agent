@@ -146,14 +146,12 @@ def main():
         if 'last_bkup' in bkup_cfg:
             backup_timestamp = bkup_cfg['last_bkup']
 
-    has_test = get_field_or_default(op_config, 'test_enabled', False)
-
     set_agent_state(AgentState.RUNNING)
 
     while get_agent_state() is AgentState.RUNNING:
         # Hook for automated testing instrumentation
-        if has_test:
-            test_hook(op_config)
+        if not main.test_hook is None:
+            main.test_hook(op_config)
 
         if not get_agent_state() is AgentState.RUNNING:
             break
@@ -188,6 +186,9 @@ def main():
         perform_backup(logger, op_config)
 
     set_agent_state(AgentState.FINISHED)
+
+
+main.test_hook = None
 
 
 def get_field_or_default(cfg, field_name, default):
@@ -416,20 +417,6 @@ def calc_md5_for_dir(directory):
 
     return md5_update_from_dir(directory, hashlib.md5()).hexdigest()
 
-
-def test_hook(op_config):
-    runtime = get_field_or_default(op_config, 'test_sample_runtime', 0)
-
-    if runtime > 0 and time.time() - test_hook.init_timestamp > runtime:
-        signal_handler(signal.SIGINT, None)
-
-    if get_field_or_default(op_config, 'test_kill_process_on_exit', False) and get_agent_state() is AgentState.SHUTTING_DOWN:
-        pinfo = get_process_info(op_config)
-        if not pinfo is None:
-            os.kill(int(pinfo['pid']), signal.SIGINT)
-
-
-test_hook.init_timestamp = time.time()
 
 if __name__ == "__main__":
     main()
