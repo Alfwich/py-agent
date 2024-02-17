@@ -58,12 +58,35 @@ def run_test_agent(key, test_fn):
     }
 
 def boot_test(p):
-    # no-op check, just not exceptions
-    pass
+    # nothing to test, so long as the test does not throw an exception we're good
+    assert(True)
 
 def backup_test(p):
+    backup_files = os.listdir(tmp_path_test_bkup_dir)
+
+    # Should only have a single manifest and a single backup
+    assert(len(backup_files) == 2)
+    manifest_file_name = next((x for x in backup_files if x.endswith('.json')), None)
+
+    # Should have the manifest .json
+    assert(manifest_file_name)
+    cfg = None
+    with open(f"{tmp_path_test_bkup_dir}/{manifest_file_name}") as f:
+        cfg = json.loads(f.read())
+
+    # Cfg json should be valid and available
+    assert(cfg)
+
+    # We should only have a single backup
+    assert(len(cfg["bkups"]) == 1)
+
+    # The top-level hash should match the single backup hash
+    assert(cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"])
+
+    # The timestamp for the single backup should be close to the final backup time
+    assert(cfg["bkups"][0]["timestamp"] - cfg["last_bkup"] < 10.0)
+
     # TODO: Check that the backup has been made per specifications
-    pass
 
 def generate_config(cwd):
 
@@ -80,22 +103,19 @@ def generate_config(cwd):
         exec_args =
         backup_interval =
         backup_total_to_keep = 10
-        backup_target_dir =
+        backup_target_dir = {cwd}/target/test/test_target
         backup_target_hash_dir =
-        backup_dest_dir =
-        sample_runtime =
+        backup_dest_dir = {cwd}/target/test/bkup
+        sample_runtime = 1
         kill_process_on_exit = True
 
         [boot_test]
-        sample_runtime = 1
 
         [backup_test]
-        sample_runtime = 3
+        sample_runtime = 1
         exec_dir = C:\Windows
         exec_name = notepad.exe
-        backup_interval = 1
-        backup_target_dir = {cwd}/target/test/test_target
-        backup_dest_dir = {cwd}/target/test/bkup
+        backup_interval = 0.25
         backup_total_to_keep = 1
         """
     else:
