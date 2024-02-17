@@ -132,12 +132,15 @@ def main():
 
     set_agent_state(AgentState.RUNNING)
 
-    while (get_agent_state() is AgentState.RUNNING):
+    while get_agent_state() is AgentState.RUNNING:
         # Hook for automated testing instrumentation 
         test_hook(op_config)
 
+        if not get_agent_state() is AgentState.RUNNING:
+            break
+
         logger.log(f"Polling tick {get_additional_process_info(op_config, backup_timestamp)}")
-        delay = int(op_config['poll_interval'])
+        delay = float(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
             if len(op_config['exec_name']) > 0:
@@ -148,7 +151,7 @@ def main():
                 logger.log("Failed to startup process as we don't have a exec_name or exec_startup_script")
                 exit(-1)
 
-            delay = max(int(op_config['exec_launch_cooloff']), delay)
+            delay = max(float(op_config['exec_launch_cooloff']), delay)
             backup_timestamp = time.time()
             has_process = True
         elif has_backup and time.time() - backup_timestamp >= float(op_config['backup_interval']):
@@ -162,6 +165,7 @@ def main():
     if has_backup:
         logger.log("Performing shutdown backup save")
         perform_backup(logger, op_config)
+
 
     set_agent_state(AgentState.FINISHED)
 
@@ -325,7 +329,7 @@ def get_process_info(cfg):
     processes = get_all_running_processes()
 
     for p in processes:
-        if pname_to_consider in p["raw"]:
+        if pname_to_consider.lower() in p["raw"].lower():
             return p 
 
     return None
@@ -373,6 +377,12 @@ def test_hook(op_config):
 
     if not test_hook.runtime is None and time.time() - test_hook.init_timestamp > test_hook.runtime:
         signal_handler(signal.SIGINT, None)
+
+    if 'kill_process_on_exit' in op_config and bool(op_config['kill_process_on_exit']) and get_agent_state() is AgentState.SHUTTING_DOWN:
+        pinfo = get_process_info(op_config)
+        if not pinfo is None:
+            os.kill(int(pinfo['pid']), signal.SIGINT)
+
 test_hook.init = False
 
 if __name__ == "__main__":

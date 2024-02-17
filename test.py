@@ -34,18 +34,35 @@ def teardown():
 
 def run_test(key, config, test_fn):
     setup(config)
-    run_test_agent(key, test_fn)
+    result = run_test_agent(key, test_fn)
     teardown()
+
+    return result
 
 def run_test_agent(key, test_fn):
     cmd = f"{sys.executable} .\\py-agent.py {key} .\\target\\test\\config.ini"
-    print(f"[tests] Running test: {key}")
+    print(f"Running test: {key}")
     p = subprocess.Popen(cmd, shell=True)
-    test_fn(p)
     p.wait()
-    print("[tests] Done!")
+
+    result_code = p.returncode
+    result = test_fn(p)
+    if result is None and result_code == 0:
+        print("Passed")
+    else:
+        print("Failed")
+
+    return {
+        "key": key,
+        "result": "passed" if (result is None and result_code == 0) else "failed",
+    }
 
 def boot_test(p):
+    # no-op check, just not exceptions
+    pass
+
+def backup_test(p):
+    # TODO: Check that the backup has been made per specifications
     pass
 
 def generate_config(cwd):
@@ -53,10 +70,10 @@ def generate_config(cwd):
     if os.name == 'nt':
         return fr"""
         [global]
-        poll_interval = 15
-        exec_launch_cooloff = 15
-        exec_dir =
-        exec_name =
+        poll_interval = 0.25
+        exec_launch_cooloff = 0.25
+        exec_dir = C:\Windows
+        exec_name = notepad.exe
         exec_setup_script =
         exec_startup_script =
         exec_poll_name =
@@ -67,17 +84,19 @@ def generate_config(cwd):
         backup_target_hash_dir =
         backup_dest_dir =
         sample_runtime =
+        kill_process_on_exit = True
 
         [boot_test]
-        sample_runtime = 5
+        sample_runtime = 1
+
+        [backup_test]
+        sample_runtime = 3
         exec_dir = C:\Windows
         exec_name = notepad.exe
-        backup_interval = 10
+        backup_interval = 1
         backup_target_dir = {cwd}/target/test/test_target
         backup_dest_dir = {cwd}/target/test/bkup
-        backup_total_to_keep = 5
-        poll_interval = 3
-        exec_launch_cooloff = 5
+        backup_total_to_keep = 1
         """
     else:
         # TODO: Linux?
@@ -85,7 +104,13 @@ def generate_config(cwd):
 
 def main():
     config = generate_config(os.getcwd())
-    run_test("boot_test", config, boot_test)
+    assert(len(config) > 0)
+    results = [
+        run_test("boot_test", config, boot_test),
+        run_test("backup_test", config, backup_test),
+        ]
+
+    print(results)
 
 if __name__ == "__main__":
     main()
