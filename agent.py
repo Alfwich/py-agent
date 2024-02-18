@@ -95,8 +95,9 @@ def main():
         config_path = sys.argv[2]
 
     if not os.path.isfile(config_path):
-        logger.log(f"Failed to find config file: {
-                   config_path}. Please either target a config file or create 'config.ini' at the root.")
+        logger.log(f"Failed to find config file: {config_path}")
+        logger.log(
+            "Please either target a config file or create 'config.ini' at the root.")
         logger.log(
             "Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
         exit(-1)
