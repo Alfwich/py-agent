@@ -284,8 +284,7 @@ def prune_backups(op_config, cfg, logger):
 
         while len(cfg["bkups"]) > total_bkups_to_keep:
             bkup_name_to_delete = cfg["bkups"].pop(0)["name"]
-            bkup_file_to_delete = f"{
-                op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
+            bkup_file_to_delete = f"{op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
             logger.log(f"Removing {bkup_name_to_delete}")
             if os.path.isfile(bkup_file_to_delete):
                 os.remove(bkup_file_to_delete)
