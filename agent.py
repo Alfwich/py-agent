@@ -158,8 +158,8 @@ def main():
         if not get_agent_state() is AgentState.RUNNING:
             break
 
-        logger.log(f"Polling tick {get_additional_process_info(
-            op_config, backup_timestamp)}")
+        info = get_additional_process_info(op_config, backup_timestamp)
+        logger.log(f"Polling tick {info}")
         delay = float(op_config['poll_interval'])
         if not has_process or not is_process_running(op_config):
             logger.log(f"Starting process {op_config['exec_name']}")
