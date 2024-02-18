@@ -57,6 +57,7 @@ def run_test_agent(key, test_fn):
         result = False
 
     agent.main.test_hook = None
+    sys.argv = prev_argv
 
     if result is None:
         print("Passed")
@@ -67,32 +68,6 @@ def run_test_agent(key, test_fn):
         "key": key,
         "result": "passed" if result is None else "failed",
     }
-
-
-def boot_test():
-    assert True, 'NOOP'
-
-
-def backup_test():
-    backup_files = os.listdir(tmp_path_test_bkup_dir)
-
-    assert len(backup_files) == 2, 'Should only have 2 files in backup directory'
-    manifest_file_name = next(
-        (x for x in backup_files if x.endswith('.json')), None)
-
-    assert manifest_file_name, 'Should have the manifest .json'
-    cfg = None
-    with open(f"{tmp_path_test_bkup_dir}/{manifest_file_name}") as f:
-        cfg = json.loads(f.read())
-
-    assert cfg, 'Cfg json should be valid'
-
-    assert len(cfg["bkups"]) == 1, 'We should only have a single backup'
-
-    assert cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"], 'Top level hash should match the single backup hash'
-
-    assert cfg["bkups"][0]["timestamp"] - \
-        cfg["last_bkup"] < 10.0, 'The timestamp for the single backup should be close to the final backup time'
 
 
 def generate_config(cwd):
@@ -141,6 +116,32 @@ def test_hook(op_config):
         pinfo = agent.get_process_info(op_config)
         if not pinfo is None:
             os.kill(int(pinfo['pid']), signal.SIGINT)
+
+
+def boot_test():
+    assert True, 'NOOP'
+
+
+def backup_test():
+    backup_files = os.listdir(tmp_path_test_bkup_dir)
+
+    assert len(backup_files) == 2, 'Should only have 2 files in backup directory'
+    manifest_file_name = next(
+        (x for x in backup_files if x.endswith('.json')), None)
+
+    assert manifest_file_name, 'Should have the manifest .json'
+    cfg = None
+    with open(f"{tmp_path_test_bkup_dir}/{manifest_file_name}") as f:
+        cfg = json.loads(f.read())
+
+    assert cfg, 'Cfg json should be valid'
+
+    assert len(cfg["bkups"]) == 1, 'We should only have a single backup'
+
+    assert cfg["bkups"][0]["bkup_hash"] == cfg["last_bkup_hash"], 'Top level hash should match the single backup hash'
+
+    assert cfg["bkups"][0]["timestamp"] - \
+        cfg["last_bkup"] < 10.0, 'The timestamp for the single backup should be close to the final backup time'
 
 
 def main():

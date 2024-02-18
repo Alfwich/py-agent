@@ -149,6 +149,7 @@ def main():
     set_agent_state(AgentState.RUNNING)
 
     while get_agent_state() is AgentState.RUNNING:
+
         # Hook for automated testing instrumentation
         if not main.test_hook is None:
             main.test_hook(op_config)
