@@ -211,8 +211,12 @@ def get_additional_process_info(op_config, backup_timestamp):
         if has_backup:
             time_till_next_backup_seconds = 0 if not has_backup else float(
                 op_config['backup_interval']) - (time.time() - backup_timestamp)
-            result["bkup_in"] = f"{
-                time_till_next_backup_seconds:.2f}s" if time_till_next_backup_seconds > 0 else "NOW"
+
+            label = "NOW"
+            if time_till_next_backup_seconds > 0:
+                label = f"{time_till_next_backup_seconds:.2f}s"
+
+            result["bkup_in"] = f"{label}"
 
     if result:
         inner = ", ".join(map(lambda i: f"{i[0]}: {i[1]}", result.items()))
