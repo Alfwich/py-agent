@@ -325,7 +325,7 @@ def prune_backups(op_config, cfg, logger):
 
 
 def bkup_file_name_for_config(op_config):
-    path = backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
+    path = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
     pname = get_process_name_for_config(op_config)
     bkup_file_name = f"bkup-manifest.{slugify(pname)}.json"
     return f"{path}/{bkup_file_name}"

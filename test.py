@@ -108,7 +108,6 @@ def generate_config(cwd):
 
 def test_hook(op_config):
     runtime = agent.get_field_or_default(op_config, 'test_sample_runtime', 0)
-    print(runtime)
     if runtime > 0 and time.time() - test_hook.init_timestamp > runtime:
         agent.signal_handler(signal.SIGINT, None)
 
