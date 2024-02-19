@@ -1,10 +1,10 @@
 import sys
-import subprocess
 import os
 import shutil
 import json
 import time
 import signal
+import traceback
 
 import agent
 
@@ -53,7 +53,7 @@ def run_test_agent(key, test_fn):
         os.chdir(prev_cwd)
         test_fn()
     except Exception as e:
-        print(f"Failed test: {key} due to: {e=}")
+        traceback.print_exc()
         result = False
 
     agent.main.test_hook = None

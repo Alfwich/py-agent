@@ -15,12 +15,24 @@ from enum import Enum
 from pathlib import Path
 
 
-class AgentState(Enum):
-    UNKNOWN = 0
-    SETUP = 1
-    RUNNING = 2
-    SHUTTING_DOWN = 4
-    FINISHED = 5
+class AgentState:
+    UNKNOWN, SETUP, RUNNING, SHUTTING_DOWN, FINISHED = range(5)
+
+
+class AgentConfig(Enum):
+    POLL_INTERVAL = 'poll_interval'
+    EXEC_LAUNCH_COOLOFF = 'exec_launch_cooloff'
+    EXEC_DIR = 'exec_dir'
+    EXEC_NAME = 'exec_name'
+    EXEC_SETUP_SCRIPT = 'exec_setup_script'
+    EXEC_STARTUP_SCRIPT = 'exec_startup_script'
+    EXEC_POLL_NAME = 'exec_poll_name'
+    EXEC_ARGS = 'exec_args'
+    BACKUP_INTERVAL = 'backup_interval'
+    BACKUP_TOTAL_TO_KEEP = 'backup_total_to_keep'
+    BACKUP_TARGET_DIR = 'backup_target_dir'
+    BACKUP_TARGET_HASH_DIR = 'backup_target_hash_dir'
+    BACKUP_DEST_DIR = 'backup_dest_dir'
 
 
 class Logger(object):
@@ -41,22 +53,12 @@ class Logger(object):
         self.indent = self.indent - 1 if self.indent == 1 else 0
 
 
-agent_state = AgentState.UNKNOWN
-
-
 def set_agent_state(new_state):
-    global agent_state
-    agent_state = new_state
+    main.agent_state = new_state
 
 
 def get_agent_state():
-    global agent_state
-    return agent_state
-
-
-# Share these concepts with the signal_handler
-logger = Logger(None)
-op_config = None
+    return main.agent_state
 
 
 def signal_handler(sig, frame):
@@ -64,7 +66,7 @@ def signal_handler(sig, frame):
     # The only case where we do a soft-shutdown is when the agent is running.
     if get_agent_state() is AgentState.RUNNING:
         # Perform an explicit backup and signal to the agent to terminate operations
-        logger.log(f"Shutting down agent... Ctrl+C again to force quit")
+        main.logger.log(f"Shutting down agent... Ctrl+C again to force quit")
         set_agent_state(AgentState.SHUTTING_DOWN)
     # Provide a hatch to let the user explicitly terminate the process
     else:
@@ -77,8 +79,7 @@ def signal_handler(sig, frame):
 
 def main():
 
-    global logger
-    global op_config
+    logger = main.logger
 
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -110,13 +111,13 @@ def main():
 
     target_config = sys.argv[1]
 
-    logger = Logger(target_config)
+    logger = main.logger = Logger(target_config)
 
     if not target_config in cfg:
         logger.log(f"Config '{target_config}' not found in {config_path}")
         exit(-1)
 
-    op_config = get_config_to_execute(cfg, target_config)
+    op_config = main.op_config = get_config_to_execute(cfg, target_config)
 
     has_process = is_process_running(op_config)
 
@@ -130,16 +131,25 @@ def main():
 
     if has_process:
         logger.log("Detected existing running process, skipping setup script")
-    elif len(op_config['exec_setup_script']) > 0:
-        logger.log(f"Executing setup script: {op_config['exec_setup_script']}")
-        p = subprocess.Popen(op_config['exec_setup_script'])
+    elif has_fields(op_config, AgentConfig.EXEC_STARTUP_SCRIPT):
+        startup_script_dir = get_field(op_config, AgentConfig.EXEC_STARTUP_SCRIPT)
+        logger.log(f"Executing setup script: {startup_script_dir}")
+        p = subprocess.Popen(startup_script_dir)
         p.wait()
 
-    logger.log(f"Setting execution path: {op_config['exec_dir']}")
-    os.chdir(op_config['exec_dir'])
+    if not has_fields(op_config, AgentConfig.EXEC_DIR):
+        logger.log("'exec_dir' is required for agent operation")
+        exit(-1)
 
-    has_backup = len(op_config['backup_interval']) > 0 and len(
-        op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
+    exec_name = get_field(op_config, AgentConfig.EXEC_NAME)
+    exec_args = get_field(op_config, AgentConfig.EXEC_ARGS)
+    exec_startup_script = get_field(op_config, AgentConfig.EXEC_STARTUP_SCRIPT)
+    exec_dir = get_field(op_config, AgentConfig.EXEC_DIR)
+    assert len(exec_dir) > 0, 'exec_dir is required in config'
+    logger.log(f"Setting execution path: {exec_dir}")
+    os.chdir(exec_dir)
+
+    has_backup = has_fields(op_config, AgentConfig.BACKUP_INTERVAL, AgentConfig.BACKUP_DEST_DIR, AgentConfig.BACKUP_TARGET_DIR)
     backup_timestamp = 0
     if has_backup:
         bkup_file_name = bkup_file_name_for_config(op_config)
@@ -160,23 +170,22 @@ def main():
 
         info = get_additional_process_info(op_config, backup_timestamp)
         logger.log(f"Polling tick {info}")
-        delay = float(op_config['poll_interval'])
+        delay = get_field(op_config, AgentConfig.POLL_INTERVAL, float)
         if not has_process or not is_process_running(op_config):
-            logger.log(f"Starting process {op_config['exec_name']}")
-            if len(op_config['exec_name']) > 0:
-                subprocess.Popen(
-                    (op_config['exec_name'], op_config['exec_args']))
-            elif len(op_config['exec_startup_script']) > 0:
-                subprocess.Popen(op_config['exec_startup_script'])
+            logger.log(f"Starting process {exec_name}")
+            if len(exec_name) > 0:
+                subprocess.Popen((exec_name, exec_args))
+            elif len(exec_startup_script) > 0:
+                subprocess.Popen(exec_startup_script)
             else:
                 logger.log(
                     "Failed to startup process as we don't have a exec_name or exec_startup_script")
                 exit(-1)
 
-            delay = max(float(op_config['exec_launch_cooloff']), delay)
+            delay = max(get_field(op_config, AgentConfig.EXEC_LAUNCH_COOLOFF, float), delay)
             backup_timestamp = time.time()
             has_process = True
-        elif has_backup and time.time() - backup_timestamp >= float(op_config['backup_interval']):
+        elif has_backup and time.time() - backup_timestamp >= get_field(op_config, AgentConfig.BACKUP_INTERVAL, float):
             perform_backup(logger, op_config)
             backup_timestamp = time.time()
 
@@ -190,6 +199,9 @@ def main():
     set_agent_state(AgentState.FINISHED)
 
 
+main.agent_state = AgentState.UNKNOWN
+main.logger = Logger(None)
+main.op_config = None
 main.test_hook = None
 
 
@@ -198,19 +210,34 @@ def get_field_or_default(cfg, field_name, default):
     return t(cfg[field_name]) if (field_name in cfg and len(cfg[field_name]) > 0) else default
 
 
+def get_field(cfg, field_enum, t=str):
+    field_key = field_enum.value
+
+    if field_key in cfg and len(cfg[field_key]) > 0:
+        return t(cfg[field_key])
+
+    return t()
+
+
+def has_fields(cfg, *args):
+    for v in args:
+        if len(get_field(cfg, v)) == 0:
+            return False
+
+    return True
+
+
 def get_additional_process_info(op_config, backup_timestamp):
     result = {}
     pinfo = get_process_info(op_config)
-    has_backup = len(op_config['backup_interval']) > 0 and len(
-        op_config["backup_dest_dir"]) > 0 and len(op_config["backup_target_dir"]) > 0
+    has_backup = has_fields(op_config, AgentConfig.BACKUP_INTERVAL, AgentConfig.BACKUP_DEST_DIR, AgentConfig.BACKUP_TARGET_DIR)
     if not pinfo is None:
         working_set_size_mib = int(pinfo["working_set_size"]) / 1024 / 1024
         working_set_size = f"{working_set_size_mib:.2f}MiB"
         result["WSS"] = working_set_size
         result["pid"] = pinfo["pid"]
         if has_backup:
-            time_till_next_backup_seconds = 0 if not has_backup else float(
-                op_config['backup_interval']) - (time.time() - backup_timestamp)
+            time_till_next_backup_seconds = 0 if not has_backup else get_field(op_config, AgentConfig.BACKUP_INTERVAL, float) - (time.time() - backup_timestamp)
 
             label = "NOW"
             if time_till_next_backup_seconds > 0:
@@ -235,7 +262,8 @@ def perform_backup(logger, op_config):
     logger.push_indent()
 
     consider_hash = None
-    bkup_tmp_dir = f"{op_config['backup_dest_dir']}/tmp"
+    backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
+    bkup_tmp_dir = f"{backup_dest_dir}/tmp"
     bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
 
     while True:
@@ -244,20 +272,23 @@ def perform_backup(logger, op_config):
 
         os.makedirs(bkup_tmp_name)
 
-        whole_bkup_hash = calc_md5_for_dir(op_config['backup_target_dir'])
-        consider_hash = calc_md5_for_dir(op_config['backup_target_hash_dir'] if (
-            'backup_target_hash_dir' in op_config and len(op_config['backup_target_hash_dir'])) else op_config['backup_target_dir'])
-        shutil.copytree(op_config['backup_target_dir'],
-                        bkup_tmp_name, dirs_exist_ok=True)
+        backup_target_dir = get_field(op_config, AgentConfig.BACKUP_TARGET_DIR)
+        whole_bkup_hash = calc_md5_for_dir(backup_target_dir)
+        consider_dir = get_field_or_default(op_config, AgentConfig.BACKUP_TARGET_HASH_DIR.value, backup_target_dir)
+        consider_hash = calc_md5_for_dir(consider_dir)
+        shutil.copytree(backup_target_dir, bkup_tmp_name, dirs_exist_ok=True)
 
-        # Check to ensure that existing target directory and the tmp copy are the same, and that the target
-        # directory did not change while we were making the backup archive.
-        # If the hashs don't match then we need to recopy the files as they might have changed while the agent was making the tmp copy.
-        if whole_bkup_hash == calc_md5_for_dir(op_config['backup_target_dir']) == calc_md5_for_dir(bkup_tmp_name):
+        # Ensure the tmp bkup dir, target dir, and previous target dir all are the same contents
+        if whole_bkup_hash == calc_md5_for_dir(backup_target_dir) == calc_md5_for_dir(bkup_tmp_name):
             break
+        else:
+            # Small delay to prevent being in a hot loop of constant file IO
+            time.sleep(0.1)
 
-    if not 'last_bkup_hash' in cfg or not consider_hash == cfg['last_bkup_hash']:
-        archive_name = f"{op_config['backup_dest_dir']}/{backup_name}"
+    last_config_hash = get_field_or_default(cfg, 'last_bkup_hash', '')
+    if not consider_hash == last_config_hash:
+        backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
+        archive_name = f"{backup_dest_dir}/{backup_name}"
         shutil.make_archive(archive_name, 'zip', bkup_tmp_name)
         cfg['bkups'].append(
             {"name": backup_name, "timestamp": time.time(), "bkup_hash": consider_hash})
@@ -277,14 +308,15 @@ def perform_backup(logger, op_config):
 
 
 def prune_backups(op_config, cfg, logger):
-    total_bkups_to_keep = int(op_config["backup_total_to_keep"])
+    total_bkups_to_keep = get_field(op_config, AgentConfig.BACKUP_TOTAL_TO_KEEP, int)
     if len(cfg["bkups"]) > total_bkups_to_keep:
         logger.log("Pruning backups")
         cfg["bkups"].sort(key=lambda e: e['timestamp'])
 
         while len(cfg["bkups"]) > total_bkups_to_keep:
+            backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
             bkup_name_to_delete = cfg["bkups"].pop(0)["name"]
-            bkup_file_to_delete = f"{op_config['backup_dest_dir']}/{bkup_name_to_delete}.zip"
+            bkup_file_to_delete = f"{backup_dest_dir}/{bkup_name_to_delete}.zip"
             logger.log(f"Removing {bkup_name_to_delete}")
             if os.path.isfile(bkup_file_to_delete):
                 os.remove(bkup_file_to_delete)
@@ -293,7 +325,7 @@ def prune_backups(op_config, cfg, logger):
 
 
 def bkup_file_name_for_config(op_config):
-    path = op_config['backup_dest_dir']
+    path = backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
     pname = get_process_name_for_config(op_config)
     bkup_file_name = f"bkup-manifest.{slugify(pname)}.json"
     return f"{path}/{bkup_file_name}"
