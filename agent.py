@@ -69,7 +69,7 @@ def signal_handler(sig, frame):
         main.logger.log(f"Shutting down agent... Ctrl+C again to force quit")
         set_agent_state(AgentState.SHUTTING_DOWN)
     # Provide a hatch to let the user explicitly terminate the process
-    else:
+    elif not main.is_lib == True:
         sys.exit(0)
 
 # Expected usage: ./python py-agent.py <config-to-execute> [config-file]
@@ -90,7 +90,7 @@ def main():
     if not len(sys.argv) in [2, 3]:
         logger.log(
             "Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
-        exit(-1)
+        return -1
 
     if len(sys.argv) == 3:
         config_path = sys.argv[2]
@@ -101,7 +101,8 @@ def main():
             "Please either target a config file or create 'config.ini' at the root.")
         logger.log(
             "Expected usage: ./python py-agent.py <config-to-execute> [config-file]")
-        exit(-1)
+
+        return -1
 
     cfg = read_config(config_path)
 
@@ -115,7 +116,7 @@ def main():
 
     if not target_config in cfg:
         logger.log(f"Config '{target_config}' not found in {config_path}")
-        exit(-1)
+        return -1
 
     op_config = main.op_config = get_config_to_execute(cfg, target_config)
 
@@ -139,7 +140,11 @@ def main():
 
     if not has_fields(op_config, AgentConfig.EXEC_DIR):
         logger.log("'exec_dir' is required for agent operation")
-        exit(-1)
+        return -1
+
+    if not has_one_field(op_config, AgentConfig.EXEC_NAME, AgentConfig.EXEC_STARTUP_SCRIPT):
+        logger.log("'exec_name' or 'exec_startup_script are required for agent operation")
+        return -1
 
     exec_name = get_field(op_config, AgentConfig.EXEC_NAME)
     exec_args = get_field(op_config, AgentConfig.EXEC_ARGS)
@@ -180,7 +185,7 @@ def main():
             else:
                 logger.log(
                     "Failed to startup process as we don't have a exec_name or exec_startup_script")
-                exit(-1)
+                return -1
 
             delay = max(get_field(op_config, AgentConfig.EXEC_LAUNCH_COOLOFF, float), delay)
             backup_timestamp = time.time()
@@ -189,7 +194,8 @@ def main():
             perform_backup(logger, op_config)
             backup_timestamp = time.time()
 
-        time.sleep(delay)
+        if delay > 0:
+            time.sleep(delay)
 
     # Do an explicit backup before terminating the agent process
     if has_backup:
@@ -198,11 +204,14 @@ def main():
 
     set_agent_state(AgentState.FINISHED)
 
+    return 0
+
 
 main.agent_state = AgentState.UNKNOWN
 main.logger = Logger(None)
 main.op_config = None
 main.test_hook = None
+main.is_lib = False
 
 
 def get_field_or_default(cfg, field_name, default):
@@ -225,6 +234,10 @@ def has_fields(cfg, *args):
             return False
 
     return True
+
+
+def has_one_field(cfg, *args):
+    return len(list(filter(lambda x: x, map(lambda x: has_fields(cfg, x), args)))) > 0
 
 
 def get_additional_process_info(op_config, backup_timestamp):
@@ -256,7 +269,7 @@ def perform_backup(logger, op_config):
     bkup_file_name = bkup_file_name_for_config(op_config)
     cfg = read_bkup_config(bkup_file_name)
     now = datetime.datetime.now()
-    date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S"))
+    date_str = slugify(now.strftime("%Y-%m-%d_%H-%M-%S_%f"))
     backup_name = f"{get_process_name_for_config(op_config)}.{date_str}"
     logger.log(f"Performing backup '{backup_name}'")
     logger.push_indent()
@@ -457,3 +470,5 @@ def calc_md5_for_dir(directory):
 
 if __name__ == "__main__":
     main()
+else:
+    main.is_lib = True
