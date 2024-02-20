@@ -58,7 +58,7 @@ def run_test_agent(key, test_fn):
 
     prev_argv = sys.argv
     prev_cwd = os.getcwd()
-    sys.argv = [".\\agent.py ", f"{key}", ".\\target\\test\\config.ini"]
+    sys.argv = ["agent.py ", f"{key}", "./target/test/config.ini"]
     agent.main.test_hook = test_hook
     test_hook.test_fn = test_fn
     test_hook.init_timestamp = time.time()
@@ -135,20 +135,20 @@ def test_hook(op_config):
             os.kill(int(pinfo['pid']), signal.SIGINT)
 
     if not test_hook.test_fn is None:
-        test_hook.test_fn(TestFnMode.TICK)
+        test_hook.test_fn(TestFnMode.TICK, op_config)
 
 
 test_hook.test_fn = None
 
 
-def boot_test(mode):
+def boot_test(mode, op_config=None):
     if mode is TestFnMode.SETUP:
         return generate_config(fr"""
                                """)
     assert True, 'NOOP'
 
 
-def backup_test_simple(mode):
+def backup_test_simple(mode, op_config=None):
     if mode is TestFnMode.SETUP:
         return generate_config(fr"""
             sample_runtime = 1
@@ -178,7 +178,7 @@ def backup_test_simple(mode):
         assert cfg["bkups"][0]["timestamp"] - cfg["last_bkup"] < 10.0, 'The timestamp for the single backup should be close to the final backup time'
 
 
-def backup_test_multiple(mode):
+def backup_test_multiple(mode, op_config=None):
     if mode is TestFnMode.SETUP:
         return generate_config(fr"""
             poll_interval = 0.0
@@ -193,7 +193,7 @@ def backup_test_multiple(mode):
         Path(f"{tmp_path_test_target_dir}/{time.time()}.txt").touch()
     elif mode is TestFnMode.CHECK:
         backup_files = os.listdir(tmp_path_test_bkup_dir)
-        assert len(backup_files) == 4, 'Should have 6 files in backup directory'
+        assert len(backup_files) == 4, 'Should have 4 files in backup directory (3 backups + 1 manifest)'
 
 
 def main():
@@ -203,11 +203,14 @@ def main():
         run_test(backup_test_multiple),
     ]
 
-    passed = list(filter(lambda x: x['result'] == TestResult.PASSED, results))
-    failed = list(filter(lambda x: x['result'] == TestResult.FAILED, results))
+    passed = list(map(lambda x: x['name'], filter(lambda x: x['result'] == TestResult.PASSED, results)))
+    failed = list(map(lambda x: x['name'], filter(lambda x: x['result'] == TestResult.FAILED, results)))
 
-    print(f"Passed({len(passed)}): {passed}")
-    print(f"Failed({len(failed)}): {failed}")
+    if len(failed) > 0:
+        print(f"Tests failed ({len(failed)}): {failed}")
+
+    if len(passed) > 0:
+        print(f"Tests passed ({len(passed)}): {passed}")
 
 
 if __name__ == "__main__":
