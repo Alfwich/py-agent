@@ -132,8 +132,8 @@ def main():
 
     if has_process:
         logger.log("Detected existing running process, skipping setup script")
-    elif has_fields(op_config, AgentConfig.EXEC_STARTUP_SCRIPT):
-        startup_script_dir = get_field(op_config, AgentConfig.EXEC_STARTUP_SCRIPT)
+    elif has_fields(op_config, AgentConfig.EXEC_SETUP_SCRIPT):
+        startup_script_dir = get_field(op_config, AgentConfig.EXEC_SETUP_SCRIPT)
         logger.log(f"Executing setup script: {startup_script_dir}")
         p = subprocess.Popen(startup_script_dir)
         p.wait()
