@@ -292,9 +292,12 @@ def perform_backup(logger, op_config):
         shutil.copytree(backup_target_dir, bkup_tmp_name, dirs_exist_ok=True)
 
         # Ensure the tmp bkup dir, target dir, and previous target dir all are the same contents
-        if whole_bkup_hash == calc_md5_for_dir(backup_target_dir) == calc_md5_for_dir(bkup_tmp_name):
+        backup_dir_hash = calc_md5_for_dir(backup_target_dir)
+        bkup_tmp_hash = calc_md5_for_dir(bkup_tmp_name)
+        if whole_bkup_hash == backup_dir_hash == bkup_tmp_hash:
             break
         else:
+            logger.log(f"Repeating archive as whole: {whole_bkup_hash} != backup: {backup_dir_hash} != tmp: {bkup_tmp_hash}")
             # Small delay to prevent being in a hot loop of constant file IO
             time.sleep(0.1)
 
