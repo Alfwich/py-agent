@@ -278,6 +278,7 @@ def perform_backup(logger, op_config):
     backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
     bkup_tmp_dir = f"{backup_dest_dir}/tmp"
     bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
+    bkup_tmp_check_name = f"{bkup_tmp_dir}/{backup_name}_check"
 
     while True:
         if os.path.exists(bkup_tmp_dir):
@@ -286,18 +287,16 @@ def perform_backup(logger, op_config):
         os.makedirs(bkup_tmp_name)
 
         backup_target_dir = get_field(op_config, AgentConfig.BACKUP_TARGET_DIR)
-        whole_bkup_hash = calc_md5_for_dir(backup_target_dir)
         consider_dir = get_field_or_default(op_config, AgentConfig.BACKUP_TARGET_HASH_DIR.value, backup_target_dir)
         consider_hash = calc_md5_for_dir(consider_dir)
         shutil.copytree(backup_target_dir, bkup_tmp_name, dirs_exist_ok=True)
+        shutil.copytree(backup_target_dir, bkup_tmp_check_name, dirs_exist_ok=True)
 
-        # Ensure the tmp bkup dir, target dir, and previous target dir all are the same contents
-        backup_dir_hash = calc_md5_for_dir(backup_target_dir)
-        bkup_tmp_hash = calc_md5_for_dir(bkup_tmp_name)
-        if whole_bkup_hash == backup_dir_hash == bkup_tmp_hash:
+        # Ensure the two backup copies are the same contents
+        if calc_md5_for_dir(bkup_tmp_name) == calc_md5_for_dir(bkup_tmp_check_name):
             break
         else:
-            logger.log(f"Repeating archive as whole: {whole_bkup_hash} != backup: {backup_dir_hash} != tmp: {bkup_tmp_hash}")
+            logger.log(f"Repeating archive as the target directory has changed")
             # Small delay to prevent being in a hot loop of constant file IO
             time.sleep(0.1)
 
