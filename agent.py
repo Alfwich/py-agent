@@ -200,6 +200,12 @@ def main():
     # Do an explicit backup before terminating the agent process
     if has_backup:
         logger.log("Performing shutdown backup save")
+
+        # Give the process time to settle before we backup
+        # This is a bit of a hack, but we need to ensure the process is not doing anything
+        # before we backup the directory
+        time.sleep(5.0)
+
         perform_backup(logger, op_config)
 
     set_agent_state(AgentState.FINISHED)
@@ -274,49 +280,53 @@ def perform_backup(logger, op_config):
     logger.log(f"Performing backup '{backup_name}'")
     logger.push_indent()
 
-    consider_hash = None
-    backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
-    bkup_tmp_dir = f"{backup_dest_dir}/tmp"
-    bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
-    bkup_tmp_check_name = f"{bkup_tmp_dir}/{backup_name}_check"
-
-    while True:
-        if os.path.exists(bkup_tmp_dir):
-            shutil.rmtree(bkup_tmp_dir)
-
-        os.makedirs(bkup_tmp_name)
-
-        backup_target_dir = get_field(op_config, AgentConfig.BACKUP_TARGET_DIR)
-        consider_dir = get_field_or_default(op_config, AgentConfig.BACKUP_TARGET_HASH_DIR.value, backup_target_dir)
-        consider_hash = calc_md5_for_dir(consider_dir)
-        shutil.copytree(backup_target_dir, bkup_tmp_name, dirs_exist_ok=True)
-        shutil.copytree(backup_target_dir, bkup_tmp_check_name, dirs_exist_ok=True)
-
-        # Ensure the two backup copies are the same contents
-        if calc_md5_for_dir(bkup_tmp_name) == calc_md5_for_dir(bkup_tmp_check_name):
-            break
-        else:
-            logger.log(f"Repeating archive as the target directory has changed")
-            # Small delay to prevent being in a hot loop of constant file IO
-            time.sleep(0.1)
-
-    last_config_hash = get_field_or_default(cfg, 'last_bkup_hash', '')
-    if not consider_hash == last_config_hash:
+    try:
+        consider_hash = None
         backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
-        archive_name = f"{backup_dest_dir}/{backup_name}"
-        shutil.make_archive(archive_name, 'zip', bkup_tmp_name)
-        cfg['bkups'].append(
-            {"name": backup_name, "timestamp": time.time(), "bkup_hash": consider_hash})
-        cfg['last_bkup_hash'] = consider_hash
-        cfg = prune_backups(op_config, cfg, logger)
-        logger.log(f"Backup written to disk hash: {consider_hash}")
-    else:
-        logger.log("Not backing up as backup directory has not changed")
+        bkup_tmp_dir = f"{backup_dest_dir}/tmp"
+        bkup_tmp_name = f"{bkup_tmp_dir}/{backup_name}"
+        bkup_tmp_check_name = f"{bkup_tmp_dir}/{backup_name}_check"
 
-    shutil.rmtree(bkup_tmp_dir)
+        while True:
+            if os.path.exists(bkup_tmp_dir):
+                shutil.rmtree(bkup_tmp_dir)
 
-    cfg['last_bkup'] = time.time()
-    write_bkup_config(bkup_file_name, cfg)
+            os.makedirs(bkup_tmp_name)
+
+            backup_target_dir = get_field(op_config, AgentConfig.BACKUP_TARGET_DIR)
+            consider_dir = get_field_or_default(op_config, AgentConfig.BACKUP_TARGET_HASH_DIR.value, backup_target_dir)
+            consider_hash = calc_md5_for_dir(consider_dir)
+            shutil.copytree(backup_target_dir, bkup_tmp_name, dirs_exist_ok=True)
+            shutil.copytree(backup_target_dir, bkup_tmp_check_name, dirs_exist_ok=True)
+
+            # Ensure the two backup copies are the same contents
+            if calc_md5_for_dir(bkup_tmp_name) == calc_md5_for_dir(bkup_tmp_check_name):
+                break
+            else:
+                logger.log(f"Repeating archive as the target directory has changed")
+                # Small delay to prevent being in a hot loop of constant file IO
+                time.sleep(0.1)
+
+        last_config_hash = get_field_or_default(cfg, 'last_bkup_hash', '')
+        if not consider_hash == last_config_hash:
+            backup_dest_dir = get_field(op_config, AgentConfig.BACKUP_DEST_DIR)
+            archive_name = f"{backup_dest_dir}/{backup_name}"
+            shutil.make_archive(archive_name, 'zip', bkup_tmp_name)
+            cfg['bkups'].append(
+                {"name": backup_name, "timestamp": time.time(), "bkup_hash": consider_hash})
+            cfg['last_bkup_hash'] = consider_hash
+            cfg = prune_backups(op_config, cfg, logger)
+            logger.log(f"Backup written to disk hash: {consider_hash}")
+        else:
+            logger.log("Not backing up as backup directory has not changed")
+
+        shutil.rmtree(bkup_tmp_dir)
+
+        cfg['last_bkup'] = time.time()
+        write_bkup_config(bkup_file_name, cfg)
+    except:
+        logger.log("Failed to perform backup")
+        pass
 
     logger.log('Done!')
     logger.pop_indent()
@@ -460,9 +470,13 @@ def calc_md5_for_dir(directory):
         for path in sorted(Path(directory).iterdir(), key=lambda p: str(p).lower()):
             hash.update(path.name.encode())
             if path.is_file():
-                with open(path, "rb") as f:
-                    for chunk in iter(lambda: f.read(4096), b""):
-                        hash.update(chunk)
+                try:
+                    with open(path, "rb") as f:
+                        for chunk in iter(lambda: f.read(4096), b""):
+                            hash.update(chunk)
+                except:
+                    # If the file is not readable, skip it
+                    pass
             elif path.is_dir():
                 hash = md5_update_from_dir(path, hash)
         return hash
